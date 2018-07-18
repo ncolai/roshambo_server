@@ -1,18 +1,18 @@
 #!/usr/bin/env python
-import socket, select, sys
-import random
-import signal
-from threading import Thread
+import socket, select, sys, random
 from multiprocessing.pool import ThreadPool
 
 #user defined libraries
 import utils
+from utils import HandshakeCode
 
+HOST            =       "localhost"
+PORT            =       9990
 MAX_CONNECTIONS =       5
 MOVES           =       ['rock', 'paper', 'scissors']
+SUPPORTED_PROTOCOLS =   [i for i in range(1,3)]
 
-#TODO: replace print 'xyz' with print 'xyz\n', (comma included) for thread safety
-def roshambo_ai():
+def roshambo_ai(): 
     '''Simple computer logic to play roshambo'''
     return random.randint(0,2)
 
@@ -25,6 +25,19 @@ def roshambo_turn(move1, move2):
     else:
         return "LOSE"
 
+def handshake(conn, num_connections): #the networking version of sanity check
+    '''True if successful handshake, and false if not'''
+    protocol = utils.receive_packet(conn)
+    if int(protocol) not in SUPPORTED_PROTOCOLS:
+        utils.send_packet(conn, HandshakeCode.PROTOCOL_NOT_SUPPORTED)
+    elif num_connections >= MAX_CONNECTIONS:
+        utils.send_packet(conn, HandshakeCode.SERVER_FULL)
+    else:
+        utils.send_packet(conn, HandshakeCode.HANDSHAKE_OK)
+        return True
+    conn.close() #close connection if it's bad
+    return False
+
 def ai_client(conn):
     '''Client for playing against computer'''
     while True:
@@ -33,16 +46,16 @@ def ai_client(conn):
             conn.send('ERROR')
             break
         else:
-            print(move + ' was sent')
+            utils.print_r(move + ' was sent')
             computer_move = roshambo_ai()
             status = roshambo_turn(MOVES.index(move), computer_move)
-            print(status + ' ' + MOVES[computer_move])
+            utils.print_r(status + ' ' + MOVES[computer_move])
             utils.send_packet(conn, status + ' ' + MOVES[computer_move])
     conn.close()
 
 def matchup_client(conn0, conn1):
     '''Client for two players playing against each other'''
-    while True:
+    while True: 
         #TODO: add a condition variable/semaphore to coordinate receiving bytes together
         moves = [utils.receive_packet(conn) for conn in [conn0, conn1]]
         if moves[0] not in MOVES and moves[1] not in MOVES:
@@ -52,28 +65,28 @@ def matchup_client(conn0, conn1):
         elif moves[1] not in MOVES:
             moves[1].send('ERROR')
         else:
-            print(moves[0] + ' by P1, ' + moves[1] + ' by P2')
+            utils.print_r(moves[0] + ' by P1, ' + moves[1] + ' by P2')
             status0 = roshambo_turn(MOVES.index(moves[0]), MOVES.index(moves[1]))
             status1 = roshambo_turn(MOVES.index(moves[1]), MOVES.index(moves[0]))
-            print('P1 ' + status0 + ', P2 ' + status1)
+            utils.print_r('P1 ' + status0 + ', P2 ' + status1)
             utils.send_packet(conn0, status0 + ' ' + moves[1])
             utils.send_packet(conn1, status1 + ' ' + moves[0])
     for conn in [conn0, conn1]:
         conn.close()
 
 if __name__ == "__main__":
-    HOST, PORT = "localhost", 9992
-
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.bind((HOST, PORT))
     server.listen(MAX_CONNECTIONS)
 
     pool = ThreadPool(processes=MAX_CONNECTIONS)
+    num_connections = 0 #TODO: make handshake recognize number of connections
     while True:
         conn0, addr0 = server.accept()
-        conn1, addr1 = server.accept()
-        pool.apply_async(matchup_client, (conn0,conn1,))
-        #pool.apply_async(ai_client, (conn0,))
+        handshake(conn0, num_connections)
+        #conn1, addr1 = server.accept()
+        #pool.apply_async(matchup_client, (conn0,conn1,))
+        pool.apply_async(ai_client, (conn0,))
 
     server.close()
         
