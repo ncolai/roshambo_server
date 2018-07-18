@@ -5,7 +5,9 @@ import signal
 from threading import Thread
 from multiprocessing.pool import ThreadPool
 
-MAX_BYTES       =       1024
+#user defined libraries
+import utils
+
 MAX_CONNECTIONS =       5
 MOVES           =       ['rock', 'paper', 'scissors']
 
@@ -26,7 +28,7 @@ def roshambo_turn(move1, move2):
 def ai_client(conn):
     '''Client for playing against computer'''
     while True:
-        move = conn.recv(MAX_BYTES)
+        move = utils.receive_packet(conn)
         if move not in MOVES:
             conn.send('ERROR')
             break
@@ -35,13 +37,14 @@ def ai_client(conn):
             computer_move = roshambo_ai()
             status = roshambo_turn(MOVES.index(move), computer_move)
             print(status + ' ' + MOVES[computer_move])
-            conn.send(status + ' ' + MOVES[computer_move])
+            utils.send_packet(conn, status + ' ' + MOVES[computer_move])
     conn.close()
 
 def matchup_client(conn0, conn1):
     '''Client for two players playing against each other'''
     while True:
-        moves = [conn.recv(MAX_BYTES) for conn in [conn0, conn1]]
+        #TODO: add a condition variable/semaphore to coordinate receiving bytes together
+        moves = [utils.receive_packet(conn) for conn in [conn0, conn1]]
         if moves[0] not in MOVES and moves[1] not in MOVES:
             break
         elif moves[0] not in MOVES:
@@ -53,8 +56,8 @@ def matchup_client(conn0, conn1):
             status0 = roshambo_turn(MOVES.index(moves[0]), MOVES.index(moves[1]))
             status1 = roshambo_turn(MOVES.index(moves[1]), MOVES.index(moves[0]))
             print('P1 ' + status0 + ', P2 ' + status1)
-            conn0.send(status0 + ' ' + moves[1])
-            conn1.send(status1 + ' ' + moves[0])
+            utils.send_packet(conn0, status0 + ' ' + moves[1])
+            utils.send_packet(conn1, status1 + ' ' + moves[0])
     for conn in [conn0, conn1]:
         conn.close()
 
@@ -70,6 +73,7 @@ if __name__ == "__main__":
         conn0, addr0 = server.accept()
         conn1, addr1 = server.accept()
         pool.apply_async(matchup_client, (conn0,conn1,))
+        #pool.apply_async(ai_client, (conn0,))
 
     server.close()
         
